@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -e
-
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# 先确保 dist 存在（可选）
 cd "$ROOT_DIR/span_picker/frontend"
-
-nohup npm run dev > frontend.log 2>&1 &
+npm ci
+npm run build
 
 cd "$ROOT_DIR"
-
-export SPAN_PICKER_DEV=1
-nohup streamlit run app.py > streamlit.log 2>&1 &
+unset SPAN_PICKER_DEV
+nohup streamlit run label_system.py --server.address 0.0.0.0 --server.port 8501 > streamlit.log 2>&1 &
