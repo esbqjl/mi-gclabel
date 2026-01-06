@@ -6,7 +6,11 @@ import {
   ComponentProps,
 } from "streamlit-component-lib";
 
-type Value = null | { start: number; end: number; text: string };
+// ✅ Value 改成 union：pick / click
+type Value =
+  | null
+  | { kind: "pick"; start: number; end: number; text: string }
+  | { kind: "click"; index: number };
 
 function App(props: ComponentProps) {
   const { args } = props;
@@ -17,27 +21,43 @@ function App(props: ComponentProps) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const [lastSig, setLastSig] = useState<string>("");
 
-  // 1) 首次：告诉 Streamlit “我准备好了”
   useEffect(() => {
     Streamlit.setComponentReady();
   }, []);
 
-  // 2) 任何内容变化后：重新计算 iframe 高度，避免底部被裁
   useEffect(() => {
     const raf1 = requestAnimationFrame(() => {
       Streamlit.setFrameHeight();
       const raf2 = requestAnimationFrame(() => Streamlit.setFrameHeight());
-      // @ts-ignore
       (window as any).__raf2 = raf2;
     });
 
     return () => {
       cancelAnimationFrame(raf1);
-      // @ts-ignore
       const raf2 = (window as any).__raf2;
       if (raf2) cancelAnimationFrame(raf2);
     };
   }, [text, preview_html, height]);
+
+  // ✅ 点击高亮：事件委托抓 .hl-span[data-k]
+  const onPreviewClick = (ev: React.MouseEvent<HTMLDivElement>) => {
+    const target = ev.target as HTMLElement | null;
+    if (!target) return;
+
+    const el = target.closest(".hl-span") as HTMLElement | null;
+    if (!el) return;
+
+    const kStr = el.getAttribute("data-k");
+    if (!kStr) return;
+
+    const k = parseInt(kStr, 10);
+    if (!Number.isFinite(k)) return;
+
+    Streamlit.setComponentValue({ kind: "click", index: k } as Value);
+
+    // 点击也顺手量一下高度
+    requestAnimationFrame(() => Streamlit.setFrameHeight());
+  };
 
   const onMouseUp = () => {
     const ta = taRef.current;
@@ -48,15 +68,18 @@ function App(props: ComponentProps) {
     if (e <= s) return;
 
     const pickedText = text.slice(s, e);
-    const sig = `${s}-${e}-${pickedText}`; // ✅ 注意这里必须是反引号
+    const sig = `${s}-${e}-${pickedText}`;
 
     if (sig === lastSig) return;
     setLastSig(sig);
 
-    const value: Value = { start: s, end: e, text: pickedText };
-    Streamlit.setComponentValue(value);
+    Streamlit.setComponentValue({
+      kind: "pick",
+      start: s,
+      end: e,
+      text: pickedText,
+    } as Value);
 
-    // 选区变化也可能影响布局（比如出现/隐藏某些 UI），顺手再量一次
     requestAnimationFrame(() => Streamlit.setFrameHeight());
   };
 
@@ -69,11 +92,12 @@ function App(props: ComponentProps) {
       style={{
         fontFamily:
           "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
-        paddingBottom: 8, // ✅ 给底部一点空间，防止半行被裁
+        paddingBottom: 8,
       }}
     >
       {preview_html ? (
         <div
+          onClick={onPreviewClick} // ✅ 关键：加上点击监听
           style={{
             border: "1px solid #e5e7eb",
             borderRadius: 8,

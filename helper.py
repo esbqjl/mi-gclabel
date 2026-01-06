@@ -89,28 +89,18 @@ def normalize_items(items: List[CheckItem], text_len: int) -> List[CheckItem]:
     return out
 
 def render_highlight_html(text: str, items: List[CheckItem]) -> str:
-    """
-    Render spans with background color, show tooltip for before/after/type/errormsg/decision.
-    Overlaps: later spans will still be rendered but may visually nest poorly; we keep it simple.
-    """
     n = len(text)
     items = normalize_items(items, n)
 
-    # Build "events" for segments
-    # We will render sequentially: for each item, wrap [s:e]
-    # If overlaps exist, we still render by skipping already covered region, and show a warning separately.
     segments = []
     cur = 0
     covered_until = 0
 
-    overlaps = []
-    for it in items:
+    for k, it in enumerate(items):   # ⭐这里拿到 k
         s, e = it.start_position, it.end_position
         if e <= s:
             continue
         if s < covered_until:
-            overlaps.append((s, e))
-            # still try to render but clamp to uncovered
             s = max(s, covered_until)
             if e <= s:
                 continue
@@ -120,7 +110,6 @@ def render_highlight_html(text: str, items: List[CheckItem]) -> str:
 
         t = it.type if it.type in TYPE_STYLE else "其他"
         bg, fg = TYPE_STYLE[t]
-
         tip = (
             f"type: {it.type}\n"
             f"before: {it.before_check}\n"
@@ -131,32 +120,35 @@ def render_highlight_html(text: str, items: List[CheckItem]) -> str:
         )
         span_text = text[s:e]
 
-        segments.append(("mark", span_text, (bg, fg, tip, it.decision)))
+        # meta 里把 k 带进去
+        segments.append(("mark", span_text, (bg, fg, tip, it.decision, k)))
+
         cur = e
         covered_until = max(covered_until, e)
 
     if cur < n:
         segments.append(("plain", text[cur:], None))
 
-    # Compose HTML
     out = []
     out.append("<div style='line-height:1.9; font-size:16px; white-space:pre-wrap; word-break:break-word;'>")
+
     for kind, seg, meta in segments:
         esc = html.escape(seg)
         if kind == "plain":
             out.append(esc)
         else:
-            bg, fg, tip, decision = meta
+            bg, fg, tip, decision, k = meta
             border = "2px solid #28a745" if decision == "accept" else ("2px solid #dc3545" if decision == "reject" else "1px dashed #666")
+
             out.append(
-                f"<span title='{html.escape(tip)}' "
-                f"style='background:{bg}; color:{fg}; border:{border}; padding:1px 2px; border-radius:6px;'>"
+                f"<span class='hl-span' data-k='{k}' title='{html.escape(tip)}' "
+                f"style='cursor:pointer; background:{bg}; color:{fg}; border:{border}; padding:1px 2px; border-radius:6px;'>"
                 f"{esc}</span>"
             )
-    out.append("</div>")
-    html_str = "".join(out)
 
-    return html_str
+    out.append("</div>")
+    return "".join(out)
+
 
 def apply_one_edit(text: str, it: CheckItem) -> str:
     """

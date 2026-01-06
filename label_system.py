@@ -30,6 +30,7 @@ st.session_state.setdefault("idx", 0)
 st.session_state.setdefault("pending_span", None)
 st.session_state.setdefault("last_picked_sig", "")
 st.session_state.setdefault("auto_loaded", False)
+st.session_state.setdefault("last_click_k", None)
 
 # ===== 恢复上一次数据集选择 =====
 cache = u.load_cache()
@@ -48,7 +49,7 @@ st.session_state["out_path"] = (
 
 
 WORK_FILE_POSTFIX = ".labeler_work.jsonl"
-WORK_FILE_PREFIX  = "./work"
+WORK_FILE_PREFIX  = "./work/"
 WORK_FILE = WORK_FILE_PREFIX + st.session_state["in_path"]+WORK_FILE_POSTFIX
 
 
@@ -256,37 +257,52 @@ with left:
         height=220
     )
 
+    # ✅ focus 状态（给右侧 expander 用）
+    st.session_state.setdefault("focus_k", None)
+
+    if isinstance(picked, dict) and picked.get("kind") == "click":
+        k = int(picked.get("index", -1))
+
+        # ✅ 防抖：同一个 k 不重复处理
+        if st.session_state.get("last_click_k") != k:
+            st.session_state.last_click_k = k
+            st.session_state.focus_k = k
+            st.rerun()
+            
+    pick_payload = None
+    if isinstance(picked, dict):
+        if picked.get("kind") == "pick":
+            pick_payload = picked
+        elif "start" in picked and "end" in picked:
+            pick_payload = {"kind": "pick", **picked}
+
     picked_sig = ""
-    if picked:
+    if pick_payload:
         try:
-            ps = int(picked.get("start", -1))
-            pe = int(picked.get("end", -1))
+            ps = int(pick_payload.get("start", -1))
+            pe = int(pick_payload.get("end", -1))
             picked_sig = f"{ps}-{pe}"
         except Exception:
             picked_sig = ""
 
-    # picked: None 或 {"start":..,"end":..,"text":..}
     existing_ranges = [(a["start"], a["end"]) for a in annotations]
-
-    def overlaps_existing(s, e, ranges):
-        for a, b in ranges:
-            if max(s, a) < min(e, b):   # 有交集就认为是已有（更稳）
-                return True
-        return False
 
     if "last_picked_sig" not in st.session_state:
         st.session_state.last_picked_sig = ""
 
-
-    # 初始化 pending_span
     if "pending_span" not in st.session_state:
         st.session_state.pending_span = None
 
-    # ✅ 如果当前没有 pending_span，且 picked 是新选区，则写入 pending_span
-    if st.session_state.pending_span is None and picked and picked_sig and picked_sig != st.session_state.last_picked_sig:
-        s = int(picked.get("start", -1))
-        e = int(picked.get("end", -1))
-        ttxt = picked.get("text") or text[s:e]
+    # ✅ 只有 pick 才进入 pending_span 逻辑
+    if (
+        st.session_state.pending_span is None
+        and pick_payload
+        and picked_sig
+        and picked_sig != st.session_state.last_picked_sig
+    ):
+        s = int(pick_payload.get("start", -1))
+        e = int(pick_payload.get("end", -1))
+        ttxt = pick_payload.get("text") or text[s:e]
 
         def same_range(s, e, ranges):
             return any(s == a and e == b for a, b in ranges)
@@ -298,7 +314,6 @@ with left:
                 "text": ttxt,
                 "suggest_type": "可疑错字",
             }
-            # ✅ 记为已处理（否则每次 rerun 都会反复弹）
             st.session_state.last_picked_sig = picked_sig
 
     st.caption("边框含义：绿色=已接受，红色=已拒绝，灰色虚线=未决。")
@@ -383,11 +398,13 @@ with right:
     if overlaps:
         st.warning(f"检测到 {len(overlaps)} 处重叠 span（建议人工调整 start/end 或合并）。")
 
+    focus_k = st.session_state.get("focus_k", None)
     # Edit each item
     for k, it in enumerate(items):
+        expanded = (k == focus_k) if focus_k is not None else (k == 0)
         with st.expander(
             f"[{k}] {it.type}  range=[{it.start_position},{it.end_position})  decision={it.decision}",
-            expanded=(k == 0)
+            expanded=expanded
         ):
             c1, c2, c3 = st.columns([2, 2, 3])
 
