@@ -178,7 +178,6 @@ st.session_state.idx = idx
 rec = records[idx]
 text = rec.get("corrected_sent", "")
 raw_items = rec.get("check_result", [])
-
 # Convert items to CheckItem with persisted decisions if exist
 items: List[CheckItem] = []
 for it in raw_items:
@@ -195,7 +194,7 @@ for it in raw_items:
             note=it.get("note", ""),
         )
     )
-
+items = h.normalize_items(items, len(text))
 # Top nav
 colA, colB, colC, colD = st.columns([2, 2, 3, 3])
 with colA:
@@ -399,7 +398,7 @@ with right:
         st.warning(f"检测到 {len(overlaps)} 处重叠 span（建议人工调整 start/end 或合并）。")
 
     focus_k = st.session_state.get("focus_k", None)
-    # Edit each item
+
     for k, it in enumerate(items):
         expanded = (k == focus_k) if focus_k is not None else (k == 0)
         with st.expander(
@@ -488,6 +487,7 @@ with right:
             ))
             # 写回并刷新
             items = h.merge_spans(items, text, require_same_type=True, require_same_decision=True)
+            st.session_state.focus_k = None
             rec["check_result"] = [asdict(x) for x in items]
             records[idx] = rec
             st.session_state.records = records
